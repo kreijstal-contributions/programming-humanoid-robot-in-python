@@ -6,18 +6,40 @@
 '''
 
 
+from os import name
 from recognize_posture import PostureRecognitionAgent
-
+from keyframes import leftBackToStand, leftBellyToStand, rightBackToStand, rightBellyToStand
+import math
+import random
 
 class StandingUpAgent(PostureRecognitionAgent):
     def think(self, perception):
-        self.standing_up()
+        self.standing_up(perception)
         return super(StandingUpAgent, self).think(perception)
 
-    def standing_up(self):
+    def standing_up(self, perception):
         posture = self.posture
-        # YOUR CODE HERE
-
+        t = perception.time
+        if t < self.animation_end_time:
+            return
+        if perception.time - self.stiffness_on_off_time < self.stiffness_off_cycle:
+            return
+        if perception.time - self.stiffness_on_off_time - self.stiffness_on_cycle + self.stiffness_off_cycle > 0.5:
+            return
+        if posture == 'Back':
+            keyframe_fun = random.choice([leftBackToStand, rightBackToStand])
+        elif posture == 'Belly':
+            keyframe_fun = random.choice([leftBellyToStand, rightBellyToStand])
+        else:
+            return
+        print(f"Preparing animation '{keyframe_fun.__name__}'")
+        names, times, keys = keyframe_fun()
+        _, ctimes, ckeys = self.perception_as_keyframe(perception, 0.5, names)
+        for i in range(len(names)):
+            times[i].insert(0, ctimes[i])
+            keys[i].insert(0, ckeys[i])
+        self.keyframes = (names, times, keys)
+        self.reset_animation_time(t)
 
 class TestStandingUpAgent(StandingUpAgent):
     '''this agent turns off all motor to falls down in fixed cycles

@@ -11,7 +11,10 @@
 
 
 from angle_interpolation import AngleInterpolationAgent
-from keyframes import hello
+from keyframes import leftBellyToStand, leftBackToStand
+from collections import deque
+import pickle
+import os
 
 
 class PostureRecognitionAgent(AngleInterpolationAgent):
@@ -21,20 +24,46 @@ class PostureRecognitionAgent(AngleInterpolationAgent):
                  player_id=0,
                  sync_mode=True):
         super(PostureRecognitionAgent, self).__init__(simspark_ip, simspark_port, teamname, player_id, sync_mode)
+        os.chdir(os.path.abspath(os.path.dirname(__file__)))
         self.posture = 'unknown'
-        self.posture_classifier = None  # LOAD YOUR CLASSIFIER
+        self.posture_confidence = 0.0
+        self.last_posture_ests = deque([''], maxlen=5)
+        self.posture_classifier = pickle.load(open('robot_pose.pkl', 'rb'))
 
     def think(self, perception):
-        self.posture = self.recognize_posture(perception)
+        posture_est = self.recognize_posture(perception)
+        self.last_posture_ests.append(posture_est)
+        # The estimator isn't perfect, so wait until we have a consistent
+        # estimate before declaring it as correct. This adds some delay, but
+        # also some reliability.
+        self.posture_confidence = sum([
+                1 if p == posture_est else 0
+                for p in self.last_posture_ests
+        ]) / len(self.last_posture_ests)
+        if self.posture_confidence >= 1.0:
+            self.posture = posture_est
         return super(PostureRecognitionAgent, self).think(perception)
 
     def recognize_posture(self, perception):
-        posture = 'unknown'
-        # YOUR CODE HERE
+        postures = ['Back', 'Belly', 'Crouch', 'Frog', 'HeadBack', 'Knee',
+                    'Left', 'Right', 'Sit', 'Stand', 'StandInit']
+        features = ['LHipYawPitch', 'LHipRoll', 'LHipPitch', 'LKneePitch',
+                    'RHipYawPitch', 'RHipRoll', 'RHipPitch', 'RKneePitch',
+                    'AngleX', 'AngleY']
+        imu_features = ['AngleX', 'AngleY']
 
-        return posture
+        input_data = []
+        for feature in features:
+            if feature in imu_features:
+                input_data.append(perception.imu[imu_features.index(feature)])
+            else:
+                input_data.append(perception.joint[feature])
+
+        return postures[self.posture_classifier.predict([input_data])[0]]
+
 
 if __name__ == '__main__':
     agent = PostureRecognitionAgent()
-    agent.keyframes = hello()  # CHANGE DIFFERENT KEYFRAMES
+    agent.keyframes = leftBackToStand()
+    agent.reset_animation_time(3.0)
     agent.run()
