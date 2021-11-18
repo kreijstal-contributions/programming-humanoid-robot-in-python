@@ -61,6 +61,7 @@ class PIDController(object):
             'LAnkleRoll':     (-0.76, 0.39),
             'RAnkleRoll':     (-0.39, 0.76),
         }
+        self.enabled = True
         self.sensor_limits = [sensor_limits[name] for name in JOINT_CMD_NAMES]
         self.speed_limit = 100.0
         self.y = deque(np.zeros(size), maxlen=delay + 1)
@@ -71,12 +72,21 @@ class PIDController(object):
         '''
         self.y = deque(self.y, delay + 1)
 
+    def set_enabled(self, enabled):
+        if not self.enabled and enabled:
+            self.u *= 0.0
+            self.e1 *= 0.0
+            self.e2 *= 0.0
+        self.enabled = enabled
+
     def control(self, target, sensor):
         '''apply PID control
         @param target: reference values
         @param sensor: current values from sensor
         @return control signal
         '''
+        if not self.enabled:
+            return
         # Clamp the targets to a known safe range.
         for i in range(len(target)):
             target[i] = max(self.sensor_limits[i][0], min(target[i], self.sensor_limits[i][1]))

@@ -9,7 +9,6 @@
 from os import name
 from recognize_posture import PostureRecognitionAgent
 from keyframes import leftBackToStand, leftBellyToStand, rightBackToStand, rightBellyToStand
-import math
 import random
 
 class StandingUpAgent(PostureRecognitionAgent):
@@ -22,10 +21,11 @@ class StandingUpAgent(PostureRecognitionAgent):
         t = perception.time
         if t < self.animation_end_time:
             return
-        if perception.time - self.stiffness_on_off_time < self.stiffness_off_cycle:
+        if perception.time - self.stiffness_on_off_time < self.stiffness_off_cycle \
+            or perception.time - self.stiffness_on_off_time - self.stiffness_on_cycle + self.stiffness_off_cycle > 0.5:
+            self.joint_controller.set_enabled(False)
             return
-        if perception.time - self.stiffness_on_off_time - self.stiffness_on_cycle + self.stiffness_off_cycle > 0.5:
-            return
+        self.joint_controller.set_enabled(True)
         if posture == 'Back':
             keyframe_fun = random.choice([leftBackToStand, rightBackToStand])
         elif posture == 'Belly':
