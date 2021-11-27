@@ -11,7 +11,8 @@
 
 
 from forward_kinematics import ForwardKinematicsAgent
-from numpy.matlib import identity
+import numpy as np
+from scipy.optimize import fmin
 
 
 class InverseKinematicsAgent(ForwardKinematicsAgent):
@@ -22,20 +23,45 @@ class InverseKinematicsAgent(ForwardKinematicsAgent):
         :param transform: 4x4 transform matrix
         :return: list of joint angles
         '''
-        joint_angles = []
-        # YOUR CODE HERE
-        return joint_angles
+        end_name = self.chains[effector_name][-1]
+        def err_fun(angles, target, effector_name):
+            d = {j: 0.0 for j in self.joint_names}
+            for i, j in enumerate(self.chains[effector_name]):
+                d[j] = angles[i]
+            self.forward_kinematics(d)
+            return np.linalg.norm(self.transforms[end_name] - target)
+
+        m = fmin(
+            err_fun,
+            np.random.rand(len(self.chains[effector_name])) / 1000,
+            (transform, effector_name),
+            xtol=1/10**9, ftol=1/10**9,
+            disp=True
+        )
+        return m
 
     def set_transforms(self, effector_name, transform):
         '''solve the inverse kinematics and control joints use the results
         '''
-        # YOUR CODE HERE
-        self.keyframes = ([], [], [])  # the result joint angles have to fill in
+        angles = self.inverse_kinematics(effector_name, transform)
+        names = []
+        times = []
+        keys = []
+        for j in self.joint_names:
+            names.append(j)
+            times.append([0.0, 1.0])
+            keys.append([0.0, [3, 0.1, 0.0], [3, 0.1, 0.0]])
+            if j in self.chains[effector_name]:
+                keys.append([angles[self.chains[effector_name].index(j)], [3, 0.1, 0.0], [3, 0.1, 0.0]])
+            else:
+                keys.append([0.0, [3, 0.1, 0.0], [3, 0.1, 0.0]])
+        self.keyframes = (names, times, keys)
+        self.reset_animation_time(0.0)
 
 if __name__ == '__main__':
     agent = InverseKinematicsAgent()
     # test inverse kinematics
-    T = identity(4)
+    T = np.identity(4)
     T[-1, 1] = 0.05
     T[-1, 2] = -0.26
     agent.set_transforms('LLeg', T)
