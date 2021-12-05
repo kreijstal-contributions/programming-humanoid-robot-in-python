@@ -28,7 +28,7 @@ class PostureRecognitionAgent(AngleInterpolationAgent):
         self.posture = 'unknown'
         self.posture_confidence = 0.0
         self.last_posture_ests = deque([''], maxlen=5)
-        self.posture_classifier = pickle.load(open('robot_pose.pkl', 'rb'))
+        self.posture_classifier = pickle.load(open('joint_control/robot_pose.pkl', 'rb'))
 
     def think(self, perception):
         posture_est = self.recognize_posture(perception)

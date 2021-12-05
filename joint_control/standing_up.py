@@ -35,6 +35,9 @@ class StandingUpAgent(PostureRecognitionAgent):
         print(f"Preparing animation '{keyframe_fun.__name__}'")
         names, times, keys = keyframe_fun()
         _, ctimes, ckeys = self.perception_as_keyframe(perception, 0.5, names)
+        if posture == 'Belly':
+            keys[names.index('LShoulderPitch')][0] = ckeys[names.index('LShoulderPitch')]
+            keys[names.index('RShoulderPitch')][0] = ckeys[names.index('RShoulderPitch')]
         for i in range(len(names)):
             times[i].insert(0, ctimes[i])
             keys[i].insert(0, ckeys[i])

@@ -34,8 +34,8 @@ class PIDController(object):
         self.e2 = np.zeros(size)
         # ADJUST PARAMETERS BELOW
         delay = 0
-        self.Kp = 25.0
-        self.Ki = 10.0
+        self.Kp = 30.0
+        self.Ki = 20.0
         self.Kd = 0.1
         sensor_limits = {
             'HeadYaw':        (-2.08, 2.08),
@@ -86,7 +86,7 @@ class PIDController(object):
         @return control signal
         '''
         if not self.enabled:
-            return
+            return self.u
         # Clamp the targets to a known safe range.
         for i in range(len(target)):
             target[i] = max(self.sensor_limits[i][0], min(target[i], self.sensor_limits[i][1]))
