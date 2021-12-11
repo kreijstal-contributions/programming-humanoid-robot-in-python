@@ -146,6 +146,150 @@ class ForwardKinematicsAgent(PostureRecognitionAgent):
 
                 self.transforms[joint] = T
 
+# Visualization to verify each joints rotation direction is correct
+# Shown are:
+# - All chains in random (but deterministic) colors
+# - All local transformation directions (x red, y green, z blue) of each joint
+# - All local rotation axes in black of each joint
+def animate(i, anim_angles=True):
+    global ax, agent, anim_data
+
+    import itertools
+
+    if i == 0:
+        ax.clear()
+        ax.set(xlim=(-0.225, 0.225), ylim=(-0.225, 0.225), zlim=(-0.30, 0.15))
+        anim_data = {}
+
+    if anim_angles:
+        # Choose which joints to animate and how fast/far.
+        d = {
+            'HeadYaw':        0.0,
+            'HeadPitch':      0.0,
+            'LShoulderPitch': 0.0,
+            'LShoulderRoll':  0.0,
+            'LElbowYaw':      0.0,
+            'LElbowRoll':     0.0,
+            'LWristYaw':      0.0,
+            'LHipYawPitch':   0.5,
+            'LHipRoll':       0.0,
+            'LHipPitch':      0.0,
+            'LKneePitch':     0.0,
+            'LAnklePitch':    0.0,
+            'LAnkleRoll':     0.0,
+        }
+        for k in list(d.keys()):
+            if k[0] == 'L':
+                d[f"R{k[1:]}"] = d[k]
+        # Linearly go from -pi/2 (-90°) to pi/2 (90°) in 32 steps.
+        for k in d.keys():
+            d[k] *= -pi / 2 + (i % 33) * pi / 32
+
+        agent.forward_kinematics(d)
+
+    p_data = {}
+    t_ax_len = 0.05
+    q_ax_len = 0.07
+    j_line_width = 5
+    t_line_width = 2
+    q_line_width = 1
+    for chain_joints in agent.chains.values():
+        old_P = np.array([0, 0, 0], np.float32)
+        for joint in chain_joints:
+            P = agent.transforms[joint] @ np.array([[0], [0], [0], [1]], np.float32)
+            Px = t_ax_len * (agent.transforms[joint] @ np.array([[1], [0], [0], [0]], np.float32))
+            Py = t_ax_len * (agent.transforms[joint] @ np.array([[0], [1], [0], [0]], np.float32))
+            Pz = t_ax_len * (agent.transforms[joint] @ np.array([[0], [0], [1], [0]], np.float32))
+            Pq = q_ax_len * (agent.transforms[joint] @ np.array([
+                [agent.link_quats[joint][0]],
+                [agent.link_quats[joint][1]],
+                [agent.link_quats[joint][2]],
+                [0],
+            ], np.float32))
+            if i == 0:
+                p_data[joint] = [zip(old_P, P[:3, 0])] + \
+                    [zip(P[:3, 0], (P + p)[:3, 0]) for p in [Pq, Px, Py, Pz]]
+            else:
+                anim_data[joint][0].set_data_3d(*zip(old_P, P[:3, 0]))
+                for i, p in enumerate((Pq, Px, Py, Pz), 1):
+                    anim_data[joint][i].set_data_3d(*zip(P[:3, 0], (P + p)[:3, 0]))
+            old_P = P[:3, 0]
+    if i != 0:
+        return
+    # Draw all links first
+    line_widths = [j_line_width] + [q_line_width] + [t_line_width] * 3
+    for joint in itertools.chain.from_iterable(agent.chains.values()):
+        anim_data[joint] = [ax.plot(*p_data[joint][0], linewidth=j_line_width)[0]]
+    # And only then the transformations, so they are on top.
+    for joint in itertools.chain.from_iterable(agent.chains.values()):
+        for i, color in enumerate(('k-', 'r-', 'g-', 'b-'), 1):
+            anim_data[joint] += [ax.plot(*p_data[joint][i], color, linewidth=line_widths[i])[0]]
+
+def play_animation():
+    global ax, agent
+
+    import matplotlib.pyplot as plt
+    from matplotlib.animation import FuncAnimation
+
+    fig = plt.figure()
+    ax = fig.add_subplot(111, projection='3d')
+    ax.set_box_aspect([1,1,1])
+    plt.subplots_adjust(left=0, bottom=0, right=1, top=1, wspace=0, hspace=0)
+    ani = FuncAnimation(fig, animate, frames=128, interval=50, repeat=True,
+                        fargs=(True,))
+    plt.show()
+
+def print_checks():
+    global ax, agent
+    
+    # Load data
+    import json
+    with open('kinematics/fk_samples.json') as f:
+        d = json.load(f)
+    for pose in ['init', 'moveInit', 'rest']:
+        joint_angles = {
+            joint_name: d[pose]['angles'][i]
+            for i, joint_name in enumerate(d['joint_names'])
+        }
+        for k, v in joint_angles.items():
+            print(f"{k}: {v}")
+        # Evaluate data
+        agent.forward_kinematics(joint_angles)
+
+        # Plot data
+        import matplotlib.pyplot as plt
+        fig = plt.figure()
+        ax = fig.add_subplot(111, projection='3d')
+        ax.set_box_aspect([1,1,1])
+        plt.subplots_adjust(left=0, bottom=0, right=1, top=1, wspace=0, hspace=0)
+        animate(0, False)
+        for p in d[pose]['positions']:
+            ax.plot(*p[:3], 'cx')
+        plt.show()
+
+        # Check data
+        import transforms3d as tf
+        for joint_name in agent.transforms:
+            print(joint_name)
+            print(agent.transforms[joint_name])
+            print(agent.transforms[joint_name][:3,3].flatten())
+            T, R, Z, S = tf.affines.decompose44(agent.transforms[joint_name])
+            R = tf.euler.mat2euler(R)
+            print(f"T: {T}\nR: {R}\nZ: {Z}\nS: {S}")
+            if joint_name in d['names']:
+                TR_ref = np.array(d[pose]['positions'][d['names'].index(joint_name)])
+                TR = np.array(list(T) + list(R))
+                print(f">>> {TR_ref}")
+                dt = np.linalg.norm(TR[:3] - TR_ref[:3])
+                dr = sum(abs(TR[:3] - TR_ref[:3]))
+                weighted_delta = dt + dr / 10
+
+                if weighted_delta > 10 ** -3:
+                    print(f">>> Mismatch (delta {weighted_delta:.9f})!")
+                else:
+                    print(f">>> Match (delta {weighted_delta:.9f})!")
+
 if __name__ == '__main__':
     agent = ForwardKinematicsAgent()
-    agent.run()
+    print_checks()
+    play_animation()
