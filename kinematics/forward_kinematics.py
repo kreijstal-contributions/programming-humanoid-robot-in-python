@@ -62,9 +62,11 @@ class ForwardKinematicsAgent(PostureRecognitionAgent):
         }
         # mm to m
         self.links = {k: tuple([i / 1000 for i in v]) for k, v in links.items()}
+        # Mirror the links.
         for k, v in list(self.links.items()):
             if k[0] == 'L':
                 self.links[f"R{k[1:]}"] = (v[0], -v[1], v[2])
+        # Rotation axes
         link_quats = {
             'HeadYaw':        (0, 0, 1),
             'HeadPitch':      (0, 1, 0),
@@ -73,13 +75,22 @@ class ForwardKinematicsAgent(PostureRecognitionAgent):
             'LElbowYaw':      (1, 0, 0),
             'LElbowRoll':     (0, 0, 1),
             'LWristYaw':      (1, 0, 0),
-            'LHipYawPitch':   (0,-1, 1),
+            'LHipYawPitch':   (0, 1,-1),
+            'RHipYawPitch':   (0, 1, 1),
             'LHipRoll':       (1, 0, 0),
             'LHipPitch':      (0, 1, 0),
             'LKneePitch':     (0, 1, 0),
             'LAnklePitch':    (0, 1, 0),
             'LAnkleRoll':     (1, 0, 0),
         }
+        # Mirror the rotation axes, but only for "Roll" links.
+        for k, v in list(link_quats.items()):
+            if k[0] == 'L' and not 'HipYawPitch' in k:
+                x, y, z = v
+                if 'Roll' in k:
+                    y = -y
+                link_quats[f"R{k[1:]}"] = (x, y, z)
+        # Normalize quaternion length to 1
         self.link_quats = {k: tuple([x / np.linalg.norm(v) for x in v]) for k,v in link_quats.items()}
         for k, v in list(self.link_quats.items()):
             if k[0] == 'L':
@@ -112,14 +123,14 @@ class ForwardKinematicsAgent(PostureRecognitionAgent):
             [                  0,                   0,                   0, 1],
         ], np.float32)
 
-        t = np.array([
-            [1, 0, 0, self.links[joint_name][0]],
-            [0, 1, 0, self.links[joint_name][1]],
-            [0, 0, 1, self.links[joint_name][2]],
-            [0, 0, 0,                         1],
+        m += np.array([
+            [0, 0, 0, self.links[joint_name][0]],
+            [0, 0, 0, self.links[joint_name][1]],
+            [0, 0, 0, self.links[joint_name][2]],
+            [0, 0, 0,                         0],
         ], np.float32)
 
-        return t @ m
+        return m
 
     def forward_kinematics(self, joints):
         '''forward kinematics
@@ -127,7 +138,7 @@ class ForwardKinematicsAgent(PostureRecognitionAgent):
         :param joints: {joint_name: joint_angle}
         '''
         for chain_joints in self.chains.values():
-            T = np.identity(4)
+            T = np.identity(4, np.float32)
             for joint in chain_joints:
                 angle = joints[joint]
                 Tl = self.local_trans(joint, angle)
