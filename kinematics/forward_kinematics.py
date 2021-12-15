@@ -92,9 +92,6 @@ class ForwardKinematicsAgent(PostureRecognitionAgent):
                 link_quats[f"R{k[1:]}"] = (x, y, z)
         # Normalize quaternion length to 1
         self.link_quats = {k: tuple([x / np.linalg.norm(v) for x in v]) for k,v in link_quats.items()}
-        for k, v in list(self.link_quats.items()):
-            if k[0] == 'L':
-                self.link_quats[f"R{k[1:]}"] = (v[0], -v[1], v[2])
 
     def think(self, perception):
         self.forward_kinematics(perception.joint)
