@@ -12,18 +12,18 @@
     names := [str, ...]  # list of joint names
     times := [[float, float, ...], [float, float, ...], ...]
     # times is a matrix of floats: Each line corresponding to a joint, and column element to a key.
-    keys := [[float, [int, float, float], [int, float, float]], ...]
+    keys := [[[float, [int, float, float], [int, float, float]], ...],[[float, [int, float, float], [int, float, float]], ...],...]
     # keys is a list of angles in radians or an array of arrays each containing [float angle, Handle1, Handle2],
     # where Handle is [int InterpolationType, float dTime, float dAngle] describing the handle offsets relative
     # to the angle and time of the point. The first Bezier param describes the handle that controls the curve
     # preceding the point, the second describes the curve following the point.
 '''
-
+import os
+import sys
+sys.path.append(os.path.join(os.path.abspath(os.path.dirname(__file__)), '..', 'software_installation'))
 
 from pid import PIDAgent
 from keyframes import hello
-from spark_agent import JOINT_CMD_NAMES
-
 
 def binary_search(left, right, val_fun, value):
     assert left <= right
@@ -79,6 +79,8 @@ def calc_bezier(t, points):
         + 3 * (1 - t) * t ** 2 * points[2] \
         + t ** 3 * points[3]
 
+def lambdaSpread(l):
+    return lambda _:l(*_)
 
 class AngleInterpolationAgent(PIDAgent):
     def __init__(self, simspark_ip='localhost',
@@ -90,21 +92,17 @@ class AngleInterpolationAgent(PIDAgent):
         self.keyframes = ([], [], [])
         self.animation_start_time = -1.0
         self.animation_end_time = -1.0
+        #self.animation_timer=0
+        self.time=-1
 
     def think(self, perception):
-        target_joints = self.angle_interpolation(self.keyframes, perception)
+        #self.time=perception.time
+        e=self.ellapsedTime(perception)
+        target_joints = self.angle_interpolation(self.keyframes,e)
+        self.clipKeyframes(e)
         self.target_joints.update(target_joints)
         return super(AngleInterpolationAgent, self).think(perception)
-
-    def perception_as_keyframe(self, perception,
-                               dt=0.1, names=list(JOINT_CMD_NAMES.keys())):
-        times = [0.0] * len(names)
-        keys = [
-            [perception.joint.get(j, 0), [3, dt, 0.0], [3, dt, 0.0]]
-            for j in names
-        ]
-        return names, times, keys
-
+    
     def reset_animation_time(self, start_time, speed=1.0):
         animation_start = min([self.keyframes[1][i][0]
                               for i in range(len(self.keyframes[1]))])
@@ -117,48 +115,76 @@ class AngleInterpolationAgent(PIDAgent):
         self.animation_start_time = start_time
         self.animation_end_time = start_time + \
             (animation_end - animation_start) / speed
+        
+    def ellapsedTime(self,perception):
+        if self.time==-1:
+            self.time=perception.time
+            return 0
+        e=perception.time-self.time
+        self.time=perception.time
+        return e
+    #def start_animation(self,t):
+     #   self.animation_timer=t
+    def clipKeyframes(self,ellapsedTime):
+        #name,time,keys=self.keyframes
+        if(ellapsedTime!=0):
+                 self.keyframes=(*map(lambda _:list(_),zip(
+            *map(
+                lambdaSpread(
+                    lambda n,t,k:(n,*tuple(map(lambda _:list(_),
+                        zip(
+                            *filter(
+                                lambdaSpread(lambda t,k,tp:tp>0),
+                                zip(
+                                    map(
+                                        lambda _:_-ellapsedTime,t),
+                                    k,
+                                    map(
+                                        lambda _:_-ellapsedTime,
+                                        list(t[1:])+[t[-1]]
+                                    )
+                                )
+                            )
+                        )
+                    ))[:-1])),
+                zip(*self.keyframes)))),)
+        #sanity check
+        if(len(self.keyframes)!=3):
+            self.keyframes=([],[],[])
 
-    def angle_interpolation(self, keyframes, perception):
+            
+    def angle_interpolation(self, keyframes,e):
         target_joints = {}
-        t = perception.time
-        if not (self.animation_start_time <= t <= self.animation_end_time):
-            return target_joints
-
-        names, times, keys = keyframes
-        for i, name in enumerate(names):
-            n_times, n_keys = times[i], keys[i]
-            j = binary_search(0, len(n_times) - 1, lambda i: n_times[i], t)
-            if j == 0 and t <= n_times[j] or j >= len(n_times) - 1:
-                target_joints[name] = n_keys[j][0]
+        # YOUR CODE HERE
+        timer=e
+        #binary_search(0,len(keyframes[1][0]),)
+        z=list(zip(*keyframes))
+        #print(z)
+        for joint in z:
+            #aprint(perception.time)
+            #get target of n
+            name,time,keys=joint
+            t=binary_search(0, len(time)-1, lambda a:time[a], timer)
+            if t==len(time)-1:
                 continue
-
-            assert n_keys[j][2][0] == n_keys[j + 1][1][0] == 3
-
-            P0 = Point(n_times[j + 0], n_keys[j + 0][0])
-            P3 = Point(n_times[j + 1], n_keys[j + 1][0])
-            P1 = P0 + Point(n_keys[j + 0][2][1], n_keys[j + 0][2][2])
-            P2 = P3 + Point(n_keys[j + 1][1][1], n_keys[j + 1][1][2])
+            
+            P0 = Point(time[t], keys[t][0])
+            P3 = Point(time[t + 1], keys[t + 1][0])
+            P1 = P0 + Point(keys[t][2][1], keys[t][2][2])
+            P2 = P3 + Point(keys[t + 1][1][1], keys[t + 1][1][2])
             bezier_points = [P0, P1, P2, P3]
-            bezier_t = binary_search(0.0, 1.0,
-                                     lambda g: calc_bezier(g, bezier_points).x,
-                                     t)
-            target_joints[name] = calc_bezier(bezier_t, bezier_points).y
-
-        # In the Readme.md:
-        # "The provided keyframes doesn't have joint `RHipYawPitch`, please set
-        #  `RHipYawPitch` as `LHipYawPitch` which reflects the real robot."
-        # This has another error: The animation "hello" doesn't even have
-        # either, so try setting it and catch the exception that may result.
-        try:
-            target_joints["RHipYawPitch"] = target_joints["LHipYawPitch"]
-        except KeyError:
-            pass
-
+            target_joints[name]=calc_bezier(binary_search(0.0, 1.0, 
+            lambda a:calc_bezier(a,bezier_points).x, timer),bezier_points).y
+            if(name=="LHipYawPitch"):
+                target_joints["RHipYawPitch"] = target_joints[name]
+       # try:
+       #     target_joints["RHipYawPitch"] = target_joints["LHipYawPitch"]
+       # except KeyError:
+       #     pass
         return target_joints
-
 
 if __name__ == '__main__':
     agent = AngleInterpolationAgent()
-    agent.keyframes = hello()
-    agent.reset_animation_time(1.0)
+    agent.keyframes = hello()  # CHANGE DIFFERENT KEYFRAMES
+   # agent.start_animation(365)
     agent.run()
